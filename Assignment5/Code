@@ -1,0 +1,44 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+train_df = pd.read_csv("train.csv")
+train_df.columns = train_df.columns.str.strip().str.lower()
+print("--- Data Overview ---")
+print(train_df.shape)
+print(train_df.head())
+plt.figure(figsize=(14, 6))
+sns.heatmap(train_df.isnull(), yticklabels=False, cbar=False, cmap="viridis")
+plt.title("Missing Values Heatmap")
+plt.show()
+threshold = len(train_df) * 0.8
+train_df.dropna(thresh=threshold, axis=1, inplace=True)
+numeric_cols = train_df.select_dtypes(include=[np.number]).columns.tolist()
+train_df[numeric_cols] = train_df[numeric_cols].fillna(train_df[numeric_cols].median())
+categorical_cols = train_df.select_dtypes(include=['object']).columns.tolist()
+for col in categorical_cols:
+    train_df[col] = train_df[col].fillna(train_df[col].mode()[0])
+
+train_df['totalbath'] = train_df['fullbath'] + train_df['halfbath'] * 0.5 + \
+                        train_df['bsmtfullbath'] + train_df['bsmthalfbath'] * 0.5
+train_df['totalsf'] = train_df['totalbsmtsf'] + train_df['1stflrsf'] + train_df['2ndflrsf']
+train_df['house_age'] = train_df['yrsold'] - train_df['yearbuilt']
+train_df['remodel_age'] = train_df['yrsold'] - train_df['yearremodadd']
+train_df['is_remodeled'] = (train_df['yearbuilt'] != train_df['yearremodadd']).astype(int)
+train_df['total_porch_sf'] = train_df['openporchsf'] + train_df['enclosedporch'] + \
+                              train_df['3ssnporch'] + train_df['screenporch']
+train_df['has_pool'] = (train_df['poolarea'] > 0).astype(int)
+train_df['has_fireplace'] = (train_df['fireplaces'] > 0).astype(int)
+train_df['has_garage'] = train_df['garagearea'].apply(lambda x: 1 if x > 0 else 0)
+train_df['has_basement'] = train_df['totalbsmtsf'].apply(lambda x: 1 if x > 0 else 0)
+
+train_df = pd.get_dummies(train_df, columns=categorical_cols, drop_first=True)
+
+print("\n--- Final Dataset Shape After Preprocessing ---")
+print(train_df.shape)
+
+plt.figure(figsize=(12, 10))
+corr = train_df.corr()
+sns.heatmap(corr[['saleprice']].sort_values(by='saleprice', ascending=False), annot=True, cmap='coolwarm')
+plt.title("Features Correlated with SalePrice")
+plt.show()
