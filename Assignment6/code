@@ -1,0 +1,131 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+base_path = "C:/Users/peela/OneDrive/Desktop/STUDY/CSI Internship/"
+
+train_df = pd.read_csv(base_path + "train.csv")
+train_df.columns = train_df.columns.str.strip().str.lower()
+
+threshold = len(train_df) * 0.8
+train_df.dropna(thresh=threshold, axis=1, inplace=True)
+
+numeric_cols = train_df.select_dtypes(include=[np.number]).columns.tolist()
+train_df[numeric_cols] = train_df[numeric_cols].fillna(train_df[numeric_cols].median())
+
+categorical_cols = train_df.select_dtypes(include=['object']).columns.tolist()
+for col in categorical_cols:
+    train_df[col] = train_df[col].fillna(train_df[col].mode()[0])
+
+train_df['totalbath'] = train_df['fullbath'] + train_df['halfbath'] * 0.5 + train_df['bsmtfullbath'] + train_df['bsmthalfbath'] * 0.5
+train_df['totalsf'] = train_df['totalbsmtsf'] + train_df['1stflrsf'] + train_df['2ndflrsf']
+train_df['house_age'] = train_df['yrsold'] - train_df['yearbuilt']
+train_df['remodel_age'] = train_df['yrsold'] - train_df['yearremodadd']
+train_df['is_remodeled'] = (train_df['yearbuilt'] != train_df['yearremodadd']).astype(int)
+train_df['total_porch_sf'] = train_df['openporchsf'] + train_df['enclosedporch'] + train_df['3ssnporch'] + train_df['screenporch']
+train_df['has_pool'] = (train_df['poolarea'] > 0).astype(int)
+train_df['has_fireplace'] = (train_df['fireplaces'] > 0).astype(int)
+train_df['has_garage'] = train_df['garagearea'].apply(lambda x: 1 if x > 0 else 0)
+train_df['has_basement'] = train_df['totalbsmtsf'].apply(lambda x: 1 if x > 0 else 0)
+
+train_df = pd.get_dummies(train_df, columns=categorical_cols, drop_first=True)
+
+X = train_df.drop("saleprice", axis=1)
+y = train_df["saleprice"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+models = {
+    "LinearRegression": LinearRegression(),
+    "Ridge": Ridge(),
+    "RandomForest": RandomForestRegressor(),
+    "GradientBoosting": GradientBoostingRegressor()
+}
+
+print("\n--- Model Evaluation ---")
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, preds))
+    r2 = r2_score(y_test, preds)
+    print(f"{name}: RMSE = {rmse:.2f}, R^2 = {r2:.4f}")
+
+param_grid_rf = {
+    'n_estimators': [100, 200],
+    'max_depth': [10, 20, None],
+    'min_samples_split': [2, 5],
+    'min_samples_leaf': [1, 2]
+}
+
+grid_rf = GridSearchCV(RandomForestRegressor(), param_grid_rf, cv=3, scoring='neg_root_mean_squared_error')
+grid_rf.fit(X_train, y_train)
+print("\nBest RandomForest Parameters (GridSearchCV):", grid_rf.best_params_)
+
+param_dist_gb = {
+    'n_estimators': [100, 150, 200],
+    'learning_rate': [0.01, 0.05, 0.1],
+    'max_depth': [3, 4, 5],
+    'subsample': [0.8, 1.0]
+}
+
+rand_gb = RandomizedSearchCV(GradientBoostingRegressor(), param_distributions=param_dist_gb, n_iter=10, cv=3, scoring='neg_root_mean_squared_error', random_state=42)
+rand_gb.fit(X_train, y_train)
+print("\nBest GradientBoosting Parameters (RandomizedSearchCV):", rand_gb.best_params_)
+
+best_rf = grid_rf.best_estimator_
+best_gb = rand_gb.best_estimator_
+
+for name, model in {"Best_RF": best_rf, "Best_GB": best_gb}.items():
+    preds = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, preds))
+    r2 = r2_score(y_test, preds)
+    print(f"{name}: RMSE = {rmse:.2f}, R^2 = {r2:.4f}")
+
+print("\n--- Preparing submission ---")
+test_df = pd.read_csv(base_path + "test.csv")
+test_df.columns = test_df.columns.str.strip().str.lower()
+
+for col in categorical_cols:
+    if col in test_df.columns and col in train_df.columns:
+        test_df[col] = test_df[col].fillna(train_df[col].mode()[0])
+    else:
+        print(f"Column skipped (not in test or train): {col}")
+
+for col in numeric_cols:
+    if col in test_df.columns:
+        test_df[col] = test_df[col].fillna(train_df[col].median())
+
+test_df['totalbath'] = test_df['fullbath'] + test_df['halfbath'] * 0.5 + test_df['bsmtfullbath'] + test_df['bsmthalfbath'] * 0.5
+test_df['totalsf'] = test_df['totalbsmtsf'] + test_df['1stflrsf'] + test_df['2ndflrsf']
+test_df['house_age'] = test_df['yrsold'] - test_df['yearbuilt']
+test_df['remodel_age'] = test_df['yrsold'] - test_df['yearremodadd']
+test_df['is_remodeled'] = (test_df['yearbuilt'] != test_df['yearremodadd']).astype(int)
+test_df['total_porch_sf'] = test_df['openporchsf'] + test_df['enclosedporch'] + test_df['3ssnporch'] + test_df['screenporch']
+test_df['has_pool'] = (test_df['poolarea'] > 0).astype(int)
+test_df['has_fireplace'] = (test_df['fireplaces'] > 0).astype(int)
+test_df['has_garage'] = test_df['garagearea'].apply(lambda x: 1 if x > 0 else 0)
+test_df['has_basement'] = test_df['totalbsmtsf'].apply(lambda x: 1 if x > 0 else 0)
+
+test_df = pd.get_dummies(test_df, columns=categorical_cols, drop_first=True)
+
+for col in X.columns:
+    if col not in test_df.columns:
+        test_df[col] = 0
+
+test_df = test_df[X.columns] 
+
+try:
+    submission = pd.read_csv(base_path + "sample_submission.csv")
+    submission['SalePrice'] = best_rf.predict(test_df)
+    submission.to_csv(base_path + "submission.csv", index=False)
+    print("\n✅submission.csv has been saved successfully.")
+except Exception as e:
+    print("\n Error during submission creation:", e)
